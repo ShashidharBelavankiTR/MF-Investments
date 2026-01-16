@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [demoAccount, setDemoAccount] = useState(null);
+  const [portfolioSummary, setPortfolioSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -71,9 +72,13 @@ export function AuthProvider({ children }) {
         // Then update state
         setUser(response.data.user);
         setDemoAccount(response.data.demoAccount);
+        setPortfolioSummary(response.data.portfolio); // Store portfolio summary from login
         setIsAuthenticated(true);
         
-        return { success: true };
+        return { 
+          success: true, 
+          portfolio: response.data.portfolio 
+        };
       }
     } catch (error) {
       return { success: false, error: error.message };
@@ -84,6 +89,7 @@ export function AuthProvider({ children }) {
     authApi.logout();
     setUser(null);
     setDemoAccount(null);
+    setPortfolioSummary(null);
     setIsAuthenticated(false);
   };
 
@@ -101,6 +107,7 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     demoAccount,
+    portfolioSummary,
     loading,
     isAuthenticated,
     register,

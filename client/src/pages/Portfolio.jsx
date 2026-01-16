@@ -313,6 +313,24 @@ export default function Portfolio() {
               </div>
             </div>
           </div>
+          
+          {/* Last NAV Update Indicator */}
+          {portfolio?.holdings && portfolio.holdings.length > 0 && portfolio.holdings[0]?.last_nav_date && (
+            <div className="mt-4 pt-4 border-t border-white/20">
+              <div className="flex items-center justify-center text-white/70 text-sm">
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {portfolio?.navStatus?.unavailable ? (
+                  <span className="text-yellow-300">
+                    ⚠️ Latest NAV unavailable; showing last updated at {portfolio.navStatus.lastUpdate || portfolio.holdings[0].last_nav_date}
+                  </span>
+                ) : (
+                  <span>Latest NAV updated: {portfolio.navStatus?.lastUpdate || portfolio.holdings[0].last_nav_date}</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -506,7 +524,7 @@ export default function Portfolio() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-gray-100">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-4 border-t border-gray-100">
                   <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg p-3">
                     <div className="flex items-center mb-1">
                       <svg className="w-4 h-4 mr-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -525,6 +543,18 @@ export default function Portfolio() {
                     </div>
                     <p className="font-bold text-emerald-900">{formatCurrency(holding.invested_amount || 0)}</p>
                   </div>
+                  <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-3">
+                    <div className="flex items-center mb-1">
+                      <svg className="w-4 h-4 mr-1 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                      </svg>
+                      <p className="text-xs text-purple-700 font-medium">Invested NAV</p>
+                    </div>
+                    <p className="font-bold text-purple-900">₹{parseFloat(holding.invested_nav || 0).toFixed(4)}</p>
+                    {holding.created_at && (
+                      <p className="text-xs text-purple-600 mt-0.5">{formatDate(holding.created_at)}</p>
+                    )}
+                  </div>
                   <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3">
                     <div className="flex items-center mb-1">
                       <svg className="w-4 h-4 mr-1 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -539,7 +569,7 @@ export default function Portfolio() {
                       <svg className="w-4 h-4 mr-1 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                       </svg>
-                      <p className="text-xs text-teal-700 font-medium">Last NAV</p>
+                      <p className="text-xs text-teal-700 font-medium">Today's NAV</p>
                     </div>
                     <p className="font-bold text-teal-900">₹{parseFloat(holding.last_nav || 0).toFixed(4)}</p>
                     {holding.last_nav_date && (

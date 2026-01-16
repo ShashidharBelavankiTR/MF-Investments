@@ -2,6 +2,8 @@ import 'dotenv/config';
 import app from './app.js';
 import { initializeDatabase, closeDb } from './db/database.js';
 import cacheService from './services/cache.service.js';
+import cron from 'node-cron';
+import { schedulerService } from './services/scheduler.service.js';
 
 const PORT = process.env.PORT || 4000;
 
@@ -42,9 +44,47 @@ const cacheCleanupInterval = setInterval(async () => {
   }
 }, 30 * 60 * 1000);
 
+// Scheduler cron job (runs daily at 6 AM)
+// Only enabled in production, disabled in development/test
+let schedulerCron = null;
+if (process.env.ENABLE_SCHEDULER_CRON === 'true') {
+  schedulerCron = cron.schedule('0 6 * * *', async () => {
+    console.log('[Scheduler Cron] Starting daily execution at 6 AM');
+    try {
+      const result = await schedulerService.executeDueTransactions();
+      console.log('[Scheduler Cron] Execution complete:', {
+        executed: result.executed,
+        failed: result.failed,
+        skipped: result.skipped,
+        totalDue: result.totalDue,
+        durationMs: result.durationMs
+      });
+
+      // Log failures if any
+      if (result.failed > 0) {
+        console.warn('[Scheduler Cron] Failed executions:', result.details.filter(d => d.status === 'FAILED'));
+      }
+    } catch (error) {
+      console.error('[Scheduler Cron] Execution error:', error.message);
+    }
+  });
+
+  console.log('[Scheduler] Daily cron job enabled (runs at 6 AM)');
+  console.log('[Scheduler] To disable, set ENABLE_SCHEDULER_CRON=false in .env');
+} else {
+  console.log('[Scheduler] Cron job disabled. Use POST /api/scheduler/execute for manual trigger');
+  console.log('[Scheduler] To enable automatic execution, set ENABLE_SCHEDULER_CRON=true in .env');
+}
+
 // Graceful shutdown
 const shutdown = async (signal) => {
   console.log(`\n[Server] Received ${signal}, shutting down gracefully...`);
+  
+  // Stop scheduler cron job
+  if (schedulerCron) {
+    schedulerCron.stop();
+    console.log('[Scheduler] Cron job stopped');
+  }
   
   // Clear interval
   clearInterval(cacheCleanupInterval);

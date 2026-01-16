@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { userModel } from '../models/user.model.js';
 import { demoAccountModel } from '../models/demoAccount.model.js';
+import { demoService } from '../services/demo.service.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const JWT_EXPIRES_IN = '7d';
@@ -162,6 +163,22 @@ export const authController = {
         { expiresIn: JWT_EXPIRES_IN }
       );
 
+      // Fetch and update portfolio with latest NAVs on login
+      let portfolioSummary = null;
+      let lastNavUpdate = null;
+      try {
+        const portfolio = await demoService.getPortfolio(user.id);
+        portfolioSummary = portfolio.summary;
+        
+        // Get timestamp of latest NAV update if holdings exist
+        if (portfolio.holdings && portfolio.holdings.length > 0) {
+          lastNavUpdate = portfolio.holdings[0]?.last_nav_date || new Date().toISOString().split('T')[0];
+        }
+      } catch (error) {
+        console.error('[Auth] Failed to fetch portfolio on login:', error.message);
+        // Continue with login even if portfolio fetch fails
+      }
+
       res.json({
         success: true,
         message: 'Login successful',
@@ -174,6 +191,13 @@ export const authController = {
           demoAccount: {
             balance: demoAccount.balance
           },
+          portfolio: portfolioSummary ? {
+            totalInvested: portfolioSummary.totalInvested,
+            totalCurrent: portfolioSummary.totalCurrent,
+            totalReturns: portfolioSummary.totalReturns,
+            returnsPercentage: portfolioSummary.returnsPercentage,
+            lastNavUpdate
+          } : null,
           token
         }
       });

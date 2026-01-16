@@ -76,6 +76,23 @@ export const demoService = {
       // Calculate units
       const units = amount / latestNav;
 
+      // Determine transaction status and next execution date based on start date
+      let transactionStatus = 'SUCCESS';
+      let nextExecutionDate = null;
+      
+      // For SIP/STP transactions with future start date, set status to PENDING
+      if ((transactionType === 'SIP' || transactionType === 'STP') && startDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset time to start of day
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        
+        if (start > today) {
+          transactionStatus = 'PENDING';
+          nextExecutionDate = startDate; // Set next execution to start date
+        }
+      }
+
       // Create transaction record
       const transaction = await transactionModel.create({
         userId,
@@ -89,45 +106,55 @@ export const demoService = {
         startDate: transactionType === 'LUMP_SUM' ? null : startDate,
         endDate: transactionType === 'LUMP_SUM' ? null : endDate,
         installments: transactionType === 'LUMP_SUM' ? null : installments,
-        status: 'SUCCESS'
+        status: transactionStatus,
+        nextExecutionDate: nextExecutionDate
       });
 
-      // Update demo balance
-      const newBalance = currentBalance - amount;
-      log('[Demo Service] Updating balance - old:', currentBalance, 'new:', newBalance, 'deducted:', amount);
-      await demoAccountModel.updateBalance(userId, newBalance);
-
-      // Update or create holding
-      const existingHolding = await holdingModel.findByScheme(userId, schemeCode);
-      
-      if (existingHolding) {
-        await holdingModel.upsert({
-          userId,
-          schemeCode,
-          schemeName,
-          units: existingHolding.total_units + units,
-          investedAmount: existingHolding.invested_amount + amount,
-          currentValue: (existingHolding.total_units + units) * latestNav,
-          lastNav: latestNav,
-          lastNavDate: fundDetails.latestNAV?.date
-        });
+      // Update demo balance only if transaction is executed immediately (not pending)
+      let newBalance = currentBalance;
+      if (transactionStatus === 'SUCCESS') {
+        newBalance = currentBalance - amount;
+        log('[Demo Service] Updating balance - old:', currentBalance, 'new:', newBalance, 'deducted:', amount);
+        await demoAccountModel.updateBalance(userId, newBalance);
       } else {
-        await holdingModel.upsert({
-          userId,
-          schemeCode,
-          schemeName,
-          units,
-          investedAmount: amount,
-          currentValue: units * latestNav,
-          lastNav: latestNav,
-          lastNavDate: fundDetails.latestNAV?.date
-        });
+        log('[Demo Service] Transaction pending - balance not updated yet');
+      }
+
+      // Update or create holding only if transaction is executed immediately (not pending)
+      if (transactionStatus === 'SUCCESS') {
+        const existingHolding = await holdingModel.findByScheme(userId, schemeCode);
+        
+        if (existingHolding) {
+          await holdingModel.upsert({
+            userId,
+            schemeCode,
+            schemeName,
+            units: existingHolding.total_units + units,
+            investedAmount: existingHolding.invested_amount + amount,
+            currentValue: (existingHolding.total_units + units) * latestNav,
+            lastNav: latestNav,
+            lastNavDate: fundDetails.latestNAV?.date
+          });
+        } else {
+          await holdingModel.upsert({
+            userId,
+            schemeCode,
+            schemeName,
+            units,
+            investedAmount: amount,
+            currentValue: units * latestNav,
+            lastNav: latestNav,
+            lastNavDate: fundDetails.latestNAV?.date
+          });
+        }
+      } else {
+        log('[Demo Service] Transaction pending - holdings not updated yet');
       }
 
       return {
         transaction,
         newBalance,
-        holding: holdingModel.findByScheme(userId, schemeCode)
+        holding: transactionStatus === 'SUCCESS' ? await holdingModel.findByScheme(userId, schemeCode) : null
       };
     } else if (transactionType === 'SWP') {
       // Withdrawal transaction - check sufficient units
@@ -146,6 +173,21 @@ export const demoService = {
         throw new Error('Insufficient units for withdrawal');
       }
 
+      // Determine transaction status based on start date
+      let transactionStatus = 'SUCCESS';
+      
+      // For SWP transactions with future start date, set status to PENDING
+      if (startDate) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Reset time to start of day
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        
+        if (start > today) {
+          transactionStatus = 'PENDING';
+        }
+      }
+
       // Create transaction record
       const transaction = await transactionModel.create({
         userId,
@@ -159,20 +201,26 @@ export const demoService = {
         startDate,
         endDate,
         installments,
-        status: 'SUCCESS'
+        status: transactionStatus
       });
 
-      // Update demo balance (credit)
-      const newBalance = currentBalance + amount;
-      await demoAccountModel.updateBalance(userId, newBalance);
+      // Update demo balance and holdings only if transaction is executed immediately (not pending)
+      let newBalance = currentBalance;
+      if (transactionStatus === 'SUCCESS') {
+        // Update demo balance (credit)
+        newBalance = currentBalance + amount;
+        await demoAccountModel.updateBalance(userId, newBalance);
 
-      // Update holding (remove units)
-      await holdingModel.removeUnits(userId, schemeCode, requiredUnits, amount);
+        // Update holding (remove units)
+        await holdingModel.removeUnits(userId, schemeCode, requiredUnits, amount);
+      } else {
+        log('[Demo Service] SWP transaction pending - balance and holdings not updated yet');
+      }
 
       return {
         transaction,
         newBalance,
-        holding: await holdingModel.findByScheme(userId, schemeCode)
+        holding: transactionStatus === 'SUCCESS' ? await holdingModel.findByScheme(userId, schemeCode) : holding
       };
     } else {
       throw new Error('Invalid transaction type');
@@ -187,6 +235,9 @@ export const demoService = {
     const holdings = await holdingModel.findByUserId(userId);
     log('[Demo Service] Retrieved', holdings.length, 'holdings for userId:', userId);
     const balance = await demoAccountModel.getBalance(userId);
+    
+    let navUnavailable = false;
+    let lastSuccessfulUpdate = null;
     
     // Update current values with latest NAV
     const updatedHoldings = await Promise.all(
@@ -206,6 +257,11 @@ export const demoService = {
             // Get scheme category from meta data
             const schemeCategory = latestData.meta?.scheme_category || null;
             
+            // Track last successful NAV date
+            if (!lastSuccessfulUpdate || latestData.data[0].date > lastSuccessfulUpdate) {
+              lastSuccessfulUpdate = latestData.data[0].date;
+            }
+            
             await holdingModel.updateCurrentValue(
               userId, 
               holding.scheme_code, 
@@ -213,11 +269,16 @@ export const demoService = {
               latestData.data[0].date
             );
             
+            // Calculate invested NAV (average purchase price per unit)
+            const investedNav = totalUnits > 0 ? investedAmount / totalUnits : 0;
+            
             return {
               ...holding,
               scheme_category: schemeCategory,  // Add scheme_category
               total_units: totalUnits,
               invested_amount: investedAmount,
+              invested_nav: investedNav,
+              created_at: holding.created_at,
               last_nav: latestNav,
               last_nav_date: latestData.data[0].date,
               current_value: currentValue,
@@ -227,17 +288,32 @@ export const demoService = {
           }
         } catch (error) {
           logError(`Failed to update NAV for scheme ${holding.scheme_code}:`, error.message);
+          navUnavailable = true;
+          
+          // Use last known NAV date from database
+          if (holding.last_nav_date && (!lastSuccessfulUpdate || holding.last_nav_date > lastSuccessfulUpdate)) {
+            lastSuccessfulUpdate = holding.last_nav_date;
+          }
         }
+        
+        // Calculate invested NAV (average purchase price per unit)
+        const investedNav = totalUnits > 0 ? investedAmount / totalUnits : 0;
+        
+        // Recalculate current value using last known NAV even in error cases
+        const lastKnownNav = parseFloat(holding.last_nav || 0);
+        const recalculatedCurrentValue = totalUnits * lastKnownNav;
         
         return {
           ...holding,
           scheme_category: null,  // Add null scheme_category for error cases
           total_units: totalUnits,
           invested_amount: investedAmount,
-          current_value: currentValueFromDb,
-          returns: currentValueFromDb - investedAmount,
+          invested_nav: investedNav,
+          created_at: holding.created_at,
+          current_value: recalculatedCurrentValue,
+          returns: recalculatedCurrentValue - investedAmount,
           returns_percentage: investedAmount > 0 
-            ? ((currentValueFromDb - investedAmount) / investedAmount) * 100 
+            ? ((recalculatedCurrentValue - investedAmount) / investedAmount) * 100 
             : 0
         };
       })
@@ -255,6 +331,10 @@ export const demoService = {
         totalCurrent,
         totalReturns,
         returnsPercentage: totalInvested > 0 ? (totalReturns / totalInvested) * 100 : 0
+      },
+      navStatus: {
+        unavailable: navUnavailable,
+        lastUpdate: lastSuccessfulUpdate
       }
     };
   },

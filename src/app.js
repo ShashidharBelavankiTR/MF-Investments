@@ -13,6 +13,7 @@ import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import demoRoutes from './routes/demo.routes.js';
 import calculatorRoutes from './routes/calculator.routes.js';
+import schedulerRoutes from './routes/scheduler.routes.js';
 
 // Middleware
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
@@ -75,6 +76,7 @@ app.use('/api/demo', demoRoutes);
 app.use('/api/amcs', amcRoutes);
 app.use('/api/funds', fundRoutes);
 app.use('/api/calculator', calculatorRoutes);
+app.use('/api/scheduler', schedulerRoutes);
 app.use('/api/health', healthRoutes);
 
 // Root route - API info
@@ -95,6 +97,14 @@ app.get('/', (req, res) => {
         balance: 'GET /api/demo/balance (protected)',
         transactions: 'POST /api/demo/transactions (protected)',
         transactionHistory: 'GET /api/demo/transactions (protected)'
+      },
+      scheduler: {
+        execute: 'POST /api/scheduler/execute',
+        due: 'GET /api/scheduler/due?date=YYYY-MM-DD',
+        logs: 'GET /api/scheduler/logs/:transactionId',
+        failures: 'GET /api/scheduler/failures?limit=50',
+        statistics: 'GET /api/scheduler/statistics?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD',
+        unlock: 'POST /api/scheduler/unlock/:transactionId'
       },
       amcs: '/api/amcs',
       fundsByAmc: '/api/amcs/:id/funds',

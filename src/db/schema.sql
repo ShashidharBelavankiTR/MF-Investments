@@ -62,7 +62,13 @@ CREATE TABLE IF NOT EXISTS transactions (
     start_date VARCHAR(10),
     end_date VARCHAR(10),
     installments INT,
+    execution_count INT NOT NULL DEFAULT 0,
+    next_execution_date VARCHAR(10),
+    last_execution_date VARCHAR(10),
     status ENUM('PENDING', 'SUCCESS', 'FAILED', 'CANCELLED') NOT NULL DEFAULT 'SUCCESS',
+    failure_reason TEXT,
+    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    locked_at BIGINT,
     executed_at BIGINT NOT NULL DEFAULT (UNIX_TIMESTAMP() * 1000),
     created_at BIGINT NOT NULL DEFAULT (UNIX_TIMESTAMP() * 1000),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -70,8 +76,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     CONSTRAINT chk_amount CHECK (amount > 0),
     CONSTRAINT chk_nav CHECK (nav IS NULL OR nav > 0),
     CONSTRAINT chk_installments CHECK (installments IS NULL OR installments > 0),
+    CONSTRAINT chk_execution_count CHECK (execution_count >= 0),
     INDEX idx_transactions_user_id (user_id),
-    INDEX idx_transactions_status (status)
+    INDEX idx_transactions_status (status),
+    INDEX idx_transactions_next_execution (next_execution_date, status),
+    INDEX idx_transactions_locked (is_locked, locked_at)
 );
 
 -- Holdings table for user's mutual fund portfolio
@@ -95,4 +104,24 @@ CREATE TABLE IF NOT EXISTS holdings (
     CONSTRAINT chk_current_value CHECK (current_value IS NULL OR current_value >= 0),
     CONSTRAINT chk_last_nav CHECK (last_nav IS NULL OR last_nav > 0),
     INDEX idx_holdings_user_id (user_id)
+);
+
+-- Execution logs table for scheduler audit trail
+CREATE TABLE IF NOT EXISTS execution_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    transaction_id INT NOT NULL,
+    execution_date VARCHAR(10) NOT NULL,
+    status ENUM('SUCCESS', 'FAILED', 'SKIPPED') NOT NULL,
+    amount DECIMAL(15,2),
+    units DECIMAL(15,4),
+    nav DECIMAL(15,4),
+    balance_before DECIMAL(15,2),
+    balance_after DECIMAL(15,2),
+    failure_reason TEXT,
+    execution_duration_ms INT,
+    executed_at BIGINT NOT NULL DEFAULT (UNIX_TIMESTAMP() * 1000),
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+    INDEX idx_execution_logs_transaction_id (transaction_id),
+    INDEX idx_execution_logs_execution_date (execution_date),
+    INDEX idx_execution_logs_status (status)
 );

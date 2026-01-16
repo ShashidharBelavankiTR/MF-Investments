@@ -49,7 +49,7 @@ const { demoService } = await import('../../../src/services/demo.service.js');
 
 describe('Demo Service', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   describe('executeTransaction - Lump Sum', () => {
@@ -336,6 +336,129 @@ describe('Demo Service', () => {
         })
       );
     });
+
+    describe('SIP with future start date (PENDING status)', () => {
+      it('should set status to PENDING when start date is in the future', async () => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const futureDate = tomorrow.toISOString().split('T')[0];
+
+        mockDemoAccountModel.getBalance.mockReturnValueOnce(1000000);
+        mockMfApiService.getSchemeDetails.mockResolvedValueOnce({
+          meta: { scheme_name: 'Future SIP Fund' },
+          latestNAV: { nav: '1000.00', date: '2026-01-14' }
+        });
+        mockTransactionModel.create.mockResolvedValueOnce({ id: 10 });
+
+        await demoService.executeTransaction({
+          ...validSipData,
+          startDate: futureDate
+        });
+
+        expect(mockTransactionModel.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: 'PENDING'
+          })
+        );
+      });
+
+      it('should NOT deduct balance when SIP status is PENDING', async () => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const futureDate = tomorrow.toISOString().split('T')[0];
+
+        mockDemoAccountModel.getBalance.mockReturnValueOnce(1000000);
+        mockMfApiService.getSchemeDetails.mockResolvedValueOnce({
+          meta: { scheme_name: 'Future SIP Fund' },
+          latestNAV: { nav: '1000.00', date: '2026-01-14' }
+        });
+        mockTransactionModel.create.mockResolvedValueOnce({ id: 11 });
+
+        const result = await demoService.executeTransaction({
+          ...validSipData,
+          startDate: futureDate,
+          amount: 5000
+        });
+
+        // Balance should remain unchanged when transaction is PENDING
+        expect(mockDemoAccountModel.updateBalance).not.toHaveBeenCalled();
+        expect(result.newBalance).toBe(1000000);
+      });
+
+      it('should NOT update holdings when SIP status is PENDING', async () => {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const futureDate = tomorrow.toISOString().split('T')[0];
+
+        mockDemoAccountModel.getBalance.mockReturnValueOnce(1000000);
+        mockMfApiService.getSchemeDetails.mockResolvedValueOnce({
+          meta: { scheme_name: 'Future SIP Fund' },
+          latestNAV: { nav: '1000.00', date: '2026-01-14' }
+        });
+        mockTransactionModel.create.mockResolvedValueOnce({ id: 12 });
+
+        await demoService.executeTransaction({
+          ...validSipData,
+          startDate: futureDate
+        });
+
+        // Holdings should not be updated when transaction is PENDING
+        expect(mockHoldingModel.findByScheme).not.toHaveBeenCalled();
+        expect(mockHoldingModel.upsert).not.toHaveBeenCalled();
+      });
+
+      it('should set status to SUCCESS when start date is today', async () => {
+        const today = new Date().toISOString().split('T')[0];
+
+        mockDemoAccountModel.getBalance.mockReturnValueOnce(1000000);
+        mockMfApiService.getSchemeDetails.mockResolvedValueOnce({
+          meta: { scheme_name: 'Today SIP Fund' },
+          latestNAV: { nav: '1000.00', date: '2026-01-14' }
+        });
+        mockTransactionModel.create.mockResolvedValueOnce({ id: 13 });
+        mockHoldingModel.findByScheme.mockReturnValueOnce(null);
+
+        await demoService.executeTransaction({
+          ...validSipData,
+          startDate: today
+        });
+
+        expect(mockTransactionModel.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: 'SUCCESS'
+          })
+        );
+        expect(mockDemoAccountModel.updateBalance).toHaveBeenCalled();
+        expect(mockHoldingModel.upsert).toHaveBeenCalled();
+      });
+
+      it('should set status to SUCCESS when start date is in the past', async () => {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const pastDate = yesterday.toISOString().split('T')[0];
+
+        mockDemoAccountModel.getBalance.mockReturnValueOnce(1000000);
+        mockMfApiService.getSchemeDetails.mockResolvedValueOnce({
+          meta: { scheme_name: 'Past SIP Fund' },
+          latestNAV: { nav: '1000.00', date: '2026-01-14' }
+        });
+        mockTransactionModel.create.mockResolvedValueOnce({ id: 14 });
+        mockHoldingModel.findByScheme.mockReturnValueOnce(null);
+
+        await demoService.executeTransaction({
+          ...validSipData,
+          startDate: pastDate
+        });
+
+        expect(mockTransactionModel.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: 'SUCCESS'
+          })
+        );
+        expect(mockDemoAccountModel.updateBalance).toHaveBeenCalled();
+        expect(mockHoldingModel.upsert).toHaveBeenCalled();
+      });
+    });
   });
 
   describe('executeTransaction - SWP (Withdrawal)', () => {
@@ -353,9 +476,14 @@ describe('Demo Service', () => {
         meta: { scheme_name: 'HDFC Fund' },
         latestNAV: { nav: '1000.00', date: '2026-01-14' }
       });
-      mockHoldingModel.findByScheme.mockReturnValueOnce({
+      const initialHolding = {
         total_units: 100,
         invested_amount: 100000
+      };
+      mockHoldingModel.findByScheme.mockReturnValueOnce(initialHolding);
+      mockHoldingModel.findByScheme.mockReturnValueOnce({ // After removeUnits
+        total_units: 95,
+        invested_amount: 95000
       });
       mockTransactionModel.create.mockResolvedValueOnce({ id: 1 });
 
